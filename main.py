@@ -1,8 +1,17 @@
 # IMPORTS
 
+import os
 import math
+import docx
+import subprocess
 import pandas as pd
+from docx import Document
+from docx.shared import Pt, Cm, RGBColor
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.enum.table import WD_ALIGN_VERTICAL
 from datetime import datetime
+from docx.oxml.ns import nsdecls
+from docx.oxml import parse_xml
 
 
 # CLASSES
@@ -162,13 +171,16 @@ class Range:
     def __init__(self, start: Value, end: Value):
         if start.unit != end.unit:
             raise ValueError("Cannot create a range with different units.")
-        if start > end:
-            temp = start
-            start = end
-            end = temp
-            del temp
+        # if start > end:
+        #     temp = start
+        #     start = end
+        #     end = temp
+        #     del temp
         self.start = start
         self.end = end
+
+    def __str__(self):
+        return f"{str(self.start)} to {str(self.end)}"
 
 class Operation:
     """
@@ -247,7 +259,7 @@ class Connection(Operation):
     """
 
     def __str__(self) -> str:
-        return str(f"[{convert_time(self.get_from())} - {convert_time(self.get_to())}] Connection at {self.get_depth()}. {self.get_mud_weight()} MW. {self.get_esd()} ESD.")
+        return str(f"[{convert_time(self.get_from())} - {convert_time(self.get_to())}] Connection at {self.get_depth()}. {self.get_mud_weight()} MW. {self.get_esd()} ESD. {self.get_static_bp()} BP. {self.get_gas()} B/U.")
 
     def get_depth(self) -> Value | None:
         try:
@@ -273,11 +285,11 @@ class Connection(Operation):
             data = operation.split("@")[1].split(". ")
             for entry in data:
                 if "KSCM/Day B/U" in entry:
-                    return Value(float(entry.replace("KSCM/Day", "").strip()), "KSCM/Day")
+                    return Value(float(entry.replace("KSCM/Day B/U", "").strip()), "KSCM/Day B/U")
                 elif "No Gas to Report" in entry:
                     return Value(0, "KSCM/Day")
             return None
-        except:
+        except Exception as e:
             return None
         
     def get_static_bp(self) -> Value | Range | None:
@@ -297,6 +309,39 @@ class Connection(Operation):
             return None
         except:
             return None
+        
+class Logger:
+    """
+    This class represents the logger for the program.
+    This is a simply utility class to handle output.
+    It is not meant to be used all the time, but makes it easier to output certain messages.
+    """
+
+    def error(text: str) -> None:
+        """
+        Print an error message based on the error code.
+
+        Parameters:
+            code (int): The error code to print the message for.
+
+        Returns:
+            None
+        """
+
+        fprint(f"{Colors.RED}Error: {text}{Colors.RESET}")
+
+    def warn(text: str) -> None:
+        """
+        Print a warning message.
+
+        Parameters:
+            text (str): The warning message to print.
+
+        Returns:
+            None
+        """
+
+        fprint(f"{Colors.YELLOW}Warning: {text}{Colors.RESET}")
 
 
 # UTILITY FUNCTIONS
@@ -367,55 +412,69 @@ def convert_time(time_object: str | float) -> str | float:
         return f"{hour}:{minute:02d}"
     else:
         return None
-
-
-# MAIN FUNCTION
-
-def main() -> None:
-    data = pd.ExcelFile('sheet.xlsb')
-    sheet_names = data.sheet_names
-    sheets = []
-    for i in sheet_names:
-        try:
-            datetime.strptime(i, '%Y %b-%d')
-            sheets.append(i)
-        except ValueError:
-            continue
-        
-    clear()
-    print(sheets[2])
-    parsed = data.parse(sheets[2], dtype=str)
-    data_list = parsed.values.tolist()
-    new = []
-    count = 0
-    for i in data_list:
-        count += 1
-        if count <= 21:
-            continue
-        sub = []
-        for j in i:
-            if type(j) != float:
-                sub.append(j)
-                #print(type(j), end=' | ')
-        new.append(sub)
-        #print()
-
-    if len(new) < 0:
-        fprint(f"{Colors.RED}ERROR CODE 0{Colors.RESET}")
-        return
     
+def validate_time(timestring: str) -> bool:
+    """
+    Validate a time string in the format "HH:MM" in 24 hour time.
+    This function will check if the time string is valid and return a boolean.
+
+    Parameters:
+        timestring (str): The time string to validate.
+
+    Returns:
+        bool: True if the time string is valid, False otherwise.
+    """
+
+    try:
+        hour = int(timestring.split(":")[0])
+        minute = int(timestring.split(":")[1])
+        if hour < 0 or hour > 23:
+            return False
+        if minute < 0 or minute > 59:
+            return False
+        return True
+    except:
+        return False
+
+
+def parse_sheet(data: pd.DataFrame) -> list:
+    """
+    Parse the data from a sheet in the Excel file.
+    This function will parse the data from the sheet and return a list of operations.
+
+    Parameters:
+        data (pd.DataFrame): The data from the sheet to parse.
+
+    Returns:
+        list: A list of operations parsed from the data.
+    """
+
+    # Convert the data to a list of lists.
+    data_list = data.values.tolist()
+
+    # Initialize a new list to store the parsed data.
+    new = []
+
+    # Iterate over the data and parse the operations.
+    for index, row in enumerate(data_list):
+        if index < 21:
+            continue
+        sub = [j for j in row if type(j) != float]
+        new.append(sub)
+
+    # Validate the parsed data.
     operations = []
     for index, row in enumerate(new):
         if index == 0 and row[0] != "0":
-            fprint(f"{Colors.RED}ERROR CODE 1{Colors.RESET}")
+            Logger.error("Operation summary is malformed, please check the Excel file and try again.")
             return
         
         if len(row) <= 1:
             break
-        
+
         try:
-            cnt = int(row[3])
-            if cnt > 0:
+            connection = int(row[3])
+            if connection > 0:
                 operations.append(Connection(row))
                 continue
         except ValueError:
@@ -426,9 +485,434 @@ def main() -> None:
         elif row[3] == "D":
             operations.append(Drilling(row))
 
-    for i in operations:
-        print(str(i))
+    # Return the parsed data.
+    return operations
+
+def get_range_depth(data: list) -> Range:
+    """
+    Get the range of depths from a list of a list of operations.
+
+    Parameters:
+        data (list): The 2D list of operations to get the range from. This is a list of days, each containing a list of operations.
+
+    Returns:
+        Range: The range of depths.
+    """
+
+    # Initialize the depth list.
+    depths = []
+
+    # Iterate over the operations and extract the depths.
+    for day in data:
+            for operation in day:
+                if operation.get_depth() != None and type(operation.get_depth()) == Value:
+                    depths.append(operation.get_depth().value)
+
+    # Calculate the minimum and maximum depths.
+    depth_minimum = min(depths)
+    depth_maximum = max(depths)
+
+    # Return the range of depths.
+    return Range(Value(depth_minimum, "m"), Value(depth_maximum, "m"))
+
+
+
+# MAIN FUNCTION
+
+def main() -> None:
+    # Clear the screen and print the welcome message.
+    clear()
+    fprint(f"{Colors.BOLD}Welcome to the Drilling Report Parser!{Colors.RESET}")
+    pause()
+    clear()
+
+    # Get all files in the current directory.
+    directory = os.listdir()
+    excel_files = [file for file in directory if ((file.endswith(".xlsb") or file.endswith(".xlsx")) and not file.startswith("~$"))]
+    filename = None
+
+    # Check if there are any Excel files in the directory.
+    if len(excel_files) == 0:
+        # Print error message and return if no Excel files are found.
+        Logger.error("No Excel files found in the current directory. Please place the Excel file in the same directory as the program.")
+        return
+    elif len(excel_files) > 1:
+        # If there are multiple Excel files, prompt the user to select one.
+        excel_files.sort() # Enhance readability.
+        fprint(f"{Colors.BOLD}Multiple Excel files found in the current directory, please input the number next to the file you'd like to use:{Colors.RESET}")
+        for index, filename in enumerate(excel_files):
+            fprint(f"\t{Colors.BOLD}{index + 1}. {Colors.RESET}{filename}")
+
+        # Get user input for the file to use.
+        while True:
+            try:
+                file_index = int(input("> ")) - 1
+                if file_index < 0 or file_index >= len(excel_files):
+                    raise ValueError
+                break
+            except ValueError:
+                Logger.error("Invalid input. Please enter a valid number.")
+
+        # Set the file to the selected file.
+        filename = excel_files[file_index]
+    else:
+        # If there is only one Excel file, set the file to that file.
+        filename = excel_files[0]
+
+    # Load the Excel file and get the sheet names.
+    fprint(f"Loading Excel file '{filename}'...")
+    data = pd.ExcelFile(filename)
+
+    # Get sheet names, and filter only the sheets with dates matching the format (example: "2024 Dec-18").
+    sheet_names = data.sheet_names
+    sheets = []
+    for i in sheet_names:
+        try:
+            datetime.strptime(i, '%Y %b-%d')
+            sheets.append(i)
+        except ValueError:
+            continue
+        
+    # Check if there are any sheets with dates.
+    if len(sheets) == 0:
+        # Print error message and return if no sheets are found.
+        Logger.error("No DORs found. Please check the Excel file and try again.")
+        return
     
+    # Ask the user for a date range.
+    while True:
+        start_sheet = None
+        start_time = None
+        end_sheet = None
+        end_time = None
+
+        # Get the start date.
+        while True:
+            clear()
+            fprint(f"{Colors.BOLD}Please input the number next to the day you'd like to start at:")
+            for index, sheet in enumerate(sheets):
+                fprint(f"\t{Colors.BOLD}{index + 1}. {Colors.RESET}{sheet}")
+            try:
+                option = int(input("> "))
+                if option < 1 or option > len(sheets):
+                    raise ValueError
+                start_sheet = sheets[option - 1]
+                break
+            except ValueError:
+                Logger.error("Invalid input. Please enter a valid number.")
+                pause()
+
+        # Get the start time.
+        while True:
+            clear()
+            fprint(f"{Colors.BOLD}Selected start date: {Colors.RESET}{start_sheet}")
+            fprint(f"{Colors.BOLD}Please input the 24-hour time you'd like to start at (HH:MM):")
+            try:
+                start_time = input("> ")
+                if start_time == "":
+                    start_time = "00:00"
+                if not validate_time(start_time):
+                    raise ValueError
+                break
+            except ValueError:
+                Logger.error("Invalid input. Please enter the time in the 24-hour time format 'HH:MM'. You can leave this blank to start at 00:00.")
+                pause()
+
+        # Get the end date.
+        while True:
+            clear()
+            fprint(f"{Colors.BOLD}Selected start date: {Colors.RESET}{start_sheet}")
+            fprint(f"{Colors.BOLD}Selected start time: {Colors.RESET}{start_time}")
+            fprint(f"{Colors.BOLD}Please input the number next to the day you'd like to end at:")
+            for index, sheet in enumerate(sheets):
+                fprint(f"\t{index + 1}. {sheet}")
+            try:
+                option = int(input("> "))
+                if option < 1 or option > len(sheets):
+                    raise ValueError
+                end_sheet = sheets[option - 1]
+                break
+            except ValueError:
+                Logger.error("Invalid input. Please enter a valid number.")
+                pause()
+
+        # Get the end time.
+        while True:
+            clear()
+            fprint(f"{Colors.BOLD}Selected start date: {Colors.RESET}{start_sheet}")
+            fprint(f"{Colors.BOLD}Selected start time: {Colors.RESET}{start_time}")
+            fprint(f"{Colors.BOLD}Selected end date: {Colors.RESET}{end_sheet}")
+            fprint(f"{Colors.BOLD}Please input the 24-hour time you'd like to end at (HH:MM):")
+            try:
+                end_time = input("> ")
+                if end_time == "":
+                    end_time = "23:59"
+                if not validate_time(end_time):
+                    raise ValueError
+                break
+            except ValueError:
+                Logger.error("Invalid input. Please enter the time in the 24-hour time format 'HH:MM'. You can leave this blank to end at 23:59.")
+                pause()
+
+        # Validate the date range.
+        # Check if the start and end dates are in the wrong order.
+        if sheets.index(start_sheet) > sheets.index(end_sheet):
+            Logger.error("Invalid date range. Please select an end date after the start date.")
+            pause()
+            continue
+
+        # If the start and end dates are the same, check if the start time is after the end time.
+        if start_sheet == end_sheet:
+            if convert_time(start_time) > convert_time(end_time):
+                Logger.error("Invalid time range. Please select an end time after the start time.")
+                pause()
+                continue
+
+        # If the date range is valid, break the loop.
+        break
+
+    # Print the selected date range.x
+    clear()
+    fprint(f"{Colors.BOLD}Selected start date: {Colors.RESET}{start_sheet}")
+    fprint(f"{Colors.BOLD}Selected start time: {Colors.RESET}{start_time}")
+    fprint(f"{Colors.BOLD}Selected end date: {Colors.RESET}{end_sheet}")
+    fprint(f"{Colors.BOLD}Selected end time: {Colors.RESET}{end_time}")
+    fprint()
+
+    # Get the data from the selected sheets.
+    start_index = sheets.index(start_sheet)
+    end_index = sheets.index(end_sheet)
+    days = []
+    for i in range(start_index, end_index + 1):
+        days.append(parse_sheet(data.parse(sheets[i], dtype=str)))
+
+    # Filter the data based on the start and end times.
+    start_time = convert_time(start_time)
+    end_time = convert_time(end_time)
+    for operation in days[0].copy():
+        if operation.get_from() < start_time:
+            days[0].remove(operation)
+    for operation in days[-1].copy():
+        if operation.get_to() > end_time:
+            days[-1].remove(operation)
+
+    # Get the calculated data.
+    rows = []
+    last_depth = None
+    for index, day in enumerate(days):
+        # Initialize the data lists.
+        depths = []
+        mud_weights = []
+        pump_rates = []
+        static_bps = []
+        ecds = []
+        esds = []
+        gases = []
+
+        # Iterate over the operations and extract the data.
+        for operation in day:
+            depths.append(operation.get_depth())
+            mud_weights.append(operation.get_mud_weight())
+            if type(operation) == Drilling:
+                pump_rates.append(operation.get_pump_rate())
+                ecds.append(operation.get_ecd())
+            elif type(operation) == Connection:
+                esds.append(operation.get_esd())
+                gases.append(operation.get_gas())
+                static_bp = operation.get_static_bp()
+                if type(static_bp) == Value:
+                    static_bps.append(static_bp)
+                elif type(static_bp) == Range:
+                    static_bps.append(static_bp.start)
+                    static_bps.append(static_bp.end)
+
+        # Calcualte minimum and maximum values for depth.
+        try:
+            clean_depths = [i.value for i in depths if i != None]
+            if len(clean_depths) < len(depths):
+                Logger.warn(f"Depths data incomplete for Day #{index}.")
+            depth_minimum = min(clean_depths) if last_depth == None else last_depth
+            depth_maximum = max(clean_depths)
+            depth = f"{depth_minimum:.0f} – {depth_maximum:.0f}"
+            if depth_minimum == depth_maximum:
+                depth = f"{depth_minimum:.0f}"
+            last_depth = depth_maximum
+        except:
+            Logger.warn(f"No depth reported for Day #{index}.")
+            depth = "No depth reported"
+
+        # Calculate minimum and maximum values for mud weight.
+        try:
+            clean_mud_weights = [i.value for i in mud_weights if i != None]
+            if len(clean_mud_weights) < len(mud_weights):
+                Logger.warn(f"Mud weight data incomplete for Day #{index}.")
+            mud_weight_minimum = min(clean_mud_weights)
+            mud_weight_maximum = max(clean_mud_weights)
+            mud_weight = f"{mud_weight_minimum:.0f} – {mud_weight_maximum:.0f}"
+            if mud_weight_minimum == mud_weight_maximum:
+                mud_weight = f"{mud_weight_minimum:.0f}"
+        except:
+            Logger.warn(f"No mud weight reported for Day #{index}.")
+            mud_weight = "No mud weight reported"
+
+        # Calculate minimum and maximum values for pump rate.
+        try:
+            clean_pump_rates = [i.value for i in pump_rates if i != None]
+            if len(clean_pump_rates) < len(pump_rates):
+                Logger.warn(f"Pump rate data incomplete for Day #{index}.")
+            pump_rate_minimum = min(clean_pump_rates)
+            pump_rate_maximum = max(clean_pump_rates)
+            pump_rate = f"{round(pump_rate_minimum, 2)} – {round(pump_rate_maximum, 2)}"
+            if pump_rate_minimum == pump_rate_maximum:
+                pump_rate = f"{round(pump_rate_minimum, 2)}"
+        except:
+            Logger.warn(f"No pump rate reported for Day #{index}.")
+            pump_rate = "No pump rate reported"
+
+        # Dynamic BP is always "Line Restriction". Can also be changed later if needed.
+        dynamic_bp = "Line Restriction"
+
+        # Calculate minimum and maximum values for static BP.
+        try:
+            clean_static_bps = [i.value for i in static_bps if i != None]
+            if len(clean_static_bps) < len(static_bps):
+                Logger.warn(f"Static BP data incomplete for Day #{index}.")
+            static_bp_minimum = min(clean_static_bps)
+            static_bp_maximum = max(clean_static_bps)
+
+            if static_bp_minimum == 0 and static_bp_maximum != 0:
+                static_bp_minimum = min([i for i in clean_static_bps if i != 0])
+
+            static_bp = f"{static_bp_minimum:.0f} – {static_bp_maximum:.0f}"
+            if static_bp_minimum == 0 and static_bp_maximum == 0:
+                static_bp = "No BP"
+            elif static_bp_minimum == static_bp_maximum:
+                static_bp = f"{static_bp_minimum:.0f}"
+        except:
+            Logger.warn(f"No static BP reported for Day #{index}.")
+            static_bp = "No static BP reported"
+        
+        # Calculate average ECD and ESD.
+        try:
+            clean_ecds = [i.value for i in ecds if i != None]
+            clean_esds = [i.value for i in esds if i != None]
+            if len(clean_ecds) < len(ecds):
+                Logger.warn(f"ECD data incomplete for Day #{index}.")
+            if len(clean_esds) < len(esds):
+                Logger.warn(f"ESD data incomplete for Day #{index}.")
+            ecd_average = round(sum(clean_ecds) / len(clean_ecds)) if len(clean_ecds) > 0 else "--" 
+            esd_average = round(sum(clean_esds) / len(clean_esds)) if len(clean_esds) > 0 else "--"
+            ecd_esd_average = f"{ecd_average}/{esd_average}"
+        except:
+            Logger.warn(f"No ESD/ECD reported for Day #{index}.")
+            ecd_esd_average = "No ESD/ECD reported"
+
+        # Calculate maximum value for gas.
+        try:
+            clean_gases = [i.value for i in gases if i != None]
+            if len(clean_gases) < len(gases):
+                Logger.warn(f"Gas data incomplete for Day #{index}.")
+            gas_maximum = max(clean_gases)
+            if gas_maximum == 0:
+                gas = "No B/U gas reported"
+            else:
+                gas = f"Max {gas_maximum:.1f} kscm/d B/U gas reported"
+        except Exception:
+            Logger.warn(f"No gas reported for Day #{index}.")
+            gas = "No B/U gas reported"
+
+        row = [depth, mud_weight, pump_rate, dynamic_bp, static_bp, ecd_esd_average, gas]
+        rows.append(row)
+
+        
+    fprint(f"\n{Colors.BOLD}If you see any warnings, you may ignore them if the data is not reported in the DOR.")
+    pause()
+
+    # Format the date range.
+    start_date = datetime.strptime(start_sheet, '%Y %b-%d')
+    end_date = datetime.strptime(end_sheet, '%Y %b-%d')
+    if start_date.month == end_date.month and start_date.year == end_date.year:
+        date_range = f"{start_date.strftime('%b')} {start_date.day} - {end_date.day}, {start_date.year}"
+    elif start_date.year == end_date.year:
+        date_range = f"{start_date.strftime('%b')} {start_date.day} - {end_date.strftime('%b')} {end_date.day}, {start_date.year}"
+    else:
+        date_range = f"{start_date.strftime('%b')} {start_date.day}, {start_date.year} - {end_date.strftime('%b')} {end_date.day}, {end_date.year}"
+    
+    # Fetch maximum depth for the range.
+    maximum_depth = get_range_depth(days).end
+
+    # Create a Word document to write the report to.
+    document = Document()
+    document.sections[0].left_margin = Cm(1.27)
+    document.sections[0].right_margin = Cm(1.27)
+    document.sections[0].top_margin = Cm(1.27)
+    document.sections[0].bottom_margin = Cm(1.27)
+    date_range_paragraph = document.add_paragraph(f"{date_range} | Drilling to {maximum_depth.value:.0f} {maximum_depth.unit}MD")
+    run = date_range_paragraph.runs[0]
+    run.font.size = Pt(9)
+    run.font.name = 'Clear Sans'
+    table = document.add_table(rows=1 + len(days), cols=7)
+    
+    table_style = """
+    <w:tblBorders xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+        <w:top w:val="single" w:sz="4" w:space="0" w:color="999999"/>
+        <w:left w:val="single" w:sz="4" w:space="0" w:color="999999"/>
+        <w:bottom w:val="single" w:sz="4" w:space="0" w:color="999999"/>
+        <w:right w:val="single" w:sz="4" w:space="0" w:color="999999"/>
+        <w:insideH w:val="single" w:sz="4" w:space="0" w:color="999999"/>
+        <w:insideV w:val="single" w:sz="4" w:space="0" w:color="999999"/>
+    </w:tblBorders>
+    """
+
+    # Apply border style to the table.
+    table_borders = parse_xml(table_style)
+    table._tblPr.addnext(table_borders)
+
+
+    header_cells = table.rows[0].cells
+    headers = [
+        "Drilling Interval (mMD)",
+        "Mud Weight (kg/m³)",
+        "Pump Rate (m³/min)",
+        "Dynamic BP (kPa)",
+        "Static BP (kPa)",
+        "Avg ECD/ESD (kg/m³)",
+        "Comments"
+    ]
+
+    for index, header in enumerate(header_cells):
+        header_paragraph = header.paragraphs[0]
+        header_paragraph.text = headers[index]
+        header_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        header.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        header_paragraph.runs[0].font.size = Pt(10)
+        header_paragraph.runs[0].font.name = 'Oswald'
+        header_paragraph.runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        element = parse_xml(r'<w:shd {} w:fill="2D2F3E"/>'.format(nsdecls('w')))
+        header._tc.get_or_add_tcPr().append(element)
+
+    # Set row data.
+    column_widths = [2.72, 2.22, 2, 2.25, 2.25, 2.5, 5.11]
+    for i, row in enumerate(rows, start=1):
+        cells = table.rows[i].cells
+        for j, value in enumerate(row):
+            row_paragraph = cells[j].paragraphs[0]
+            row_paragraph.text = value
+            row_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            cells[j].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            row_paragraph.runs[0].font.size = Pt(9)
+            row_paragraph.runs[0].font.name = 'Clear Sans'
+            cells[j].width = Cm(column_widths[j])
+            if i % 2 == 0:
+                element = parse_xml(r'<w:shd {} w:fill="CCCCCC"/>'.format(nsdecls('w')))
+                cells[j]._tc.get_or_add_tcPr().append(element)  
+            else:
+                element = parse_xml(r'<w:shd {} w:fill="FFFFFF"/>'.format(nsdecls('w')))
+                cells[j]._tc.get_or_add_tcPr().append(element)
+
+    document.save("test.docx")
+    # Open the generated Word document in Microsoft Word.
+    subprocess.call(["open", "test.docx"])
 
 if __name__ == "__main__":
     main()
