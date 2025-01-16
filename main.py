@@ -1,9 +1,14 @@
+"""
+If you are reading this, you probably know what you're doing.
+Feel free to read through the code and understand how it works.
+"""
+
+
 # IMPORTS
 
 import os
 import math
 import docx
-import subprocess
 import pandas as pd
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
@@ -12,6 +17,8 @@ from docx.enum.table import WD_ALIGN_VERTICAL
 from datetime import datetime
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
+import tkinter as tk
+from tkinter import filedialog
 
 
 # CLASSES
@@ -44,6 +51,9 @@ class Value:
         self.unit = unit
 
     def __str__(self):
+        return f"{self.value}{self.unit}"
+    
+    def __repr__(self):
         return f"{self.value}{self.unit}"
     
     def __eq__(self, other):
@@ -193,6 +203,9 @@ class Operation:
     def __str__(self) -> str:
         return str(self.data)
     
+    def __repr__(self) -> str:
+        return str(self)
+    
     def get_from(self) -> float:
         return float(self.data[0])
     
@@ -288,6 +301,8 @@ class Connection(Operation):
                     return Value(float(entry.replace("KSCM/Day B/U", "").strip()), "KSCM/Day B/U")
                 elif "No Gas to Report" in entry:
                     return Value(0, "KSCM/Day")
+                elif "Flame B/U" in entry:
+                    return Value(0, "KSCM/Day")
             return None
         except Exception as e:
             return None
@@ -301,7 +316,6 @@ class Connection(Operation):
                     if any(i.lower() in entry.lower() for i in ["No BP", "Closed Choke", "Open Choke"]):
                         return Value(0, "kPa")
                     elif " to " in entry:
-                        "1400 to 1650kPa BP"
                         values = entry.replace("kPa BP", "").split(" to ")
                         start = Value(float(values[0]), "kPA")
                         end = Value(float(values[1]), "kPA")
@@ -328,7 +342,7 @@ class Logger:
             None
         """
 
-        fprint(f"{Colors.RED}Error: {text}{Colors.RESET}")
+        fprint(f"{Colors.RED}Error: {text}")
 
     def warn(text: str) -> None:
         """
@@ -341,7 +355,7 @@ class Logger:
             None
         """
 
-        fprint(f"{Colors.YELLOW}Warning: {text}{Colors.RESET}")
+        fprint(f"{Colors.YELLOW}Warning: {text}")
 
 
 # UTILITY FUNCTIONS
@@ -387,7 +401,7 @@ def pause(newlines: int = 1) -> None:
     """
 
     # Print newlines and prompt the user to press the enter key.
-    fprint(("\n" * newlines) + "Press ENTER to continue.", end="")
+    fprint(("\n" * newlines) + Colors.BOLD + "Press ENTER to continue.", end="")
     input()
 
 def convert_time(time_object: str | float) -> str | float:
@@ -467,10 +481,14 @@ def parse_sheet(data: pd.DataFrame) -> list:
     for index, row in enumerate(new):
         if index == 0 and row[0] != "0":
             Logger.error("Operation summary is malformed, please check the Excel file and try again.")
+            Logger.error("This is most likely because the first operation does not start at 0:00.")
             return
         
         if len(row) <= 1:
             break
+
+        if len(row) < 5:
+            continue
 
         try:
             connection = int(row[3])
@@ -516,52 +534,39 @@ def get_range_depth(data: list) -> Range:
     return Range(Value(depth_minimum, "m"), Value(depth_maximum, "m"))
 
 
-
 # MAIN FUNCTION
 
 def main() -> None:
     # Clear the screen and print the welcome message.
     clear()
-    fprint(f"{Colors.BOLD}Welcome to the Drilling Report Parser!{Colors.RESET}")
+    fprint(f"{Colors.BOLD}Welcome to the Drilling Report Parser!")
     pause()
     clear()
 
-    # Get all files in the current directory.
-    directory = os.listdir()
-    excel_files = [file for file in directory if ((file.endswith(".xlsb") or file.endswith(".xlsx")) and not file.startswith("~$"))]
-    filename = None
-
-    # Check if there are any Excel files in the directory.
-    if len(excel_files) == 0:
-        # Print error message and return if no Excel files are found.
-        Logger.error("No Excel files found in the current directory. Please place the Excel file in the same directory as the program.")
-        return
-    elif len(excel_files) > 1:
-        # If there are multiple Excel files, prompt the user to select one.
-        excel_files.sort() # Enhance readability.
-        fprint(f"{Colors.BOLD}Multiple Excel files found in the current directory, please input the number next to the file you'd like to use:{Colors.RESET}")
-        for index, filename in enumerate(excel_files):
-            fprint(f"\t{Colors.BOLD}{index + 1}. {Colors.RESET}{filename}")
-
-        # Get user input for the file to use.
-        while True:
-            try:
-                file_index = int(input("> ")) - 1
-                if file_index < 0 or file_index >= len(excel_files):
-                    raise ValueError
-                break
-            except ValueError:
-                Logger.error("Invalid input. Please enter a valid number.")
-
-        # Set the file to the selected file.
-        filename = excel_files[file_index]
-    else:
-        # If there is only one Excel file, set the file to that file.
-        filename = excel_files[0]
+    # Open a file dialog to select the Excel file.
+    fprint("Opening file dialog to select the Drilling Operations Report Excel file...")
+    fprint("Any messages printed after this are for debugging purposes and can be ignored.\n")
+    root = tk.Tk()
+    root.withdraw()
+    filename = filedialog.askopenfilename(
+        initialdir=os.getcwd(),
+        title="Select the Drilling Operations Report Excel file",
+        filetypes=(
+            ("Excel file", "*.xlsb *.xls *.xlsx"),
+            ("All files (may encounter errors)", "*.*")
+        )
+    )
 
     # Load the Excel file and get the sheet names.
     fprint(f"Loading Excel file '{filename}'...")
-    data = pd.ExcelFile(filename)
+    try:
+        data = pd.ExcelFile(filename)
+    except Exception as e:
+        Logger.error(f"An error occurred while loading the Excel file: {e}")
+        pause()
+        return
+    
+    pause()
 
     # Get sheet names, and filter only the sheets with dates matching the format (example: "2024 Dec-18").
     sheet_names = data.sheet_names
@@ -688,10 +693,15 @@ def main() -> None:
 
     # Filter the data based on the start and end times.
     start_time = convert_time(start_time)
-    end_time = convert_time(end_time)
+    if end_time == "23:59":
+        end_time = 1
+    else:
+        end_time = convert_time(end_time)
+
     for operation in days[0].copy():
         if operation.get_from() < start_time:
             days[0].remove(operation)
+
     for operation in days[-1].copy():
         if operation.get_to() > end_time:
             days[-1].remove(operation)
@@ -699,7 +709,7 @@ def main() -> None:
     # Get the calculated data.
     rows = []
     last_depth = None
-    for index, day in enumerate(days):
+    for index, day in enumerate(days, start=1):
         # Initialize the data lists.
         depths = []
         mud_weights = []
@@ -910,9 +920,57 @@ def main() -> None:
                 element = parse_xml(r'<w:shd {} w:fill="FFFFFF"/>'.format(nsdecls('w')))
                 cells[j]._tc.get_or_add_tcPr().append(element)
 
-    document.save("test.docx")
-    # Open the generated Word document in Microsoft Word.
-    subprocess.call(["open", "test.docx"])
+    # Print success message and open the file dialog to save the report.
+    while True:
+        try:
+            clear()
+            fprint(f"\n{Colors.BOLD}Report generated successfully!")
+            fprint("Opening a file dialog to save the report...")
+            fprint("Any messages printed after this are for debugging purposes and can be ignored.\n")
+
+            filename = filedialog.asksaveasfilename(
+                initialdir=os.getcwd(),
+                title="Save the report as",
+                filetypes=(
+                    ("Word document", "*.docx"),
+                    ("All files", "*.*")
+                ),
+                defaultextension=".docx"
+            )
+            if filename == "":
+                Logger.error("No filename entered. Try again.")
+                pause()
+                continue
+            if not filename.endswith(".docx"):
+                filename += ".docx"
+
+            document.save(filename)
+
+            # Print success message and exit the program.
+            fprint(f"\n{Colors.BOLD}Report saved successfully!")
+            fprint(f"Report saved as {filename}.")
+            fprint(f"What would you like to do next?")
+            fprint(f"\t1. Exit the program.")
+            fprint(f"\t2. Generate another report.")
+            while True:
+                try:
+                    option = int(input("> "))
+                    if option == 1:
+                        clear()
+                        fprint("Goodbye! Thank you for using the Drilling Report Parser.")
+                        return
+                    elif option == 2:
+                        main()
+                    else:
+                        raise ValueError
+                except ValueError:
+                    Logger.error("Invalid input. Please enter a valid number.")
+                    pause()
+        except Exception as e:
+            Logger.error(f"An error occurred while saving the report. Please try again.")
+            Logger.error(f"Ensure that the filename is valid and the file is not open in another program if it already exists.")
+            pause()
+
 
 if __name__ == "__main__":
     main()
