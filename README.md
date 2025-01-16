@@ -70,16 +70,25 @@ There are three main reasons this could happen.
 
 3. **Restart required**
 
-	After installation, a restart may be required to run Python files through the setup script. Simply restart your computer and try again.
+	After installing Python, a restart may be required to run Python files through the setup script. Simply restart your computer and try again.
 
 ### Python version must be at least 3.7
 This is because you may already have Python installed, and it is too old for the program to use. To fix this, run the given installer or install a version from the Python website that is newer than 3.7. This may require you to uninstall your current version, which you can do by searching up Python in your computer's applications, and uninstalling from there.
 
 ### Failed to install requirements
-This one may be a bit problematic, since this issue can cause significant problems and requires additional help. See the end of this file.
+This one may be a bit problematic, since this issue can cause significant problems and requires additional help. See the end of the page.
 
 ## During runtime
 This section is still a work in progress!
+
+### There's a bunch of weird symbols everywhere
+This may be due to your terminal being relatively primitive, and not accepting color codes. This might be annoying, but it's visual only!
+
+### There's a bunch of random words on my screen
+These are most likely debug messages from the file dialogs. These cannot be disabled, but you have nothing to worry about.
+
+### Something pops up and then disappears
+If the script doesn't run, and something pops up for a second before disappearing, this is because an error is occurring and is not being caught. To resolve this, see the end of the page.
 
 ## Still need help?
 This section is still a work in progress!
