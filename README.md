@@ -18,6 +18,9 @@ Running the program is very simple. But here's a walkthrough on how to do it.
 
 **NOTE**: Each step of this guide assumes you are pressing Enter when prompted.
 
+## Starting the program
+The first step before the program is to actually run it. For ease of use, you may simply double click the **run** file in the same folder as everything.
+
 ## Selecting a file
 The first step of the program will be to select the spreadsheet file for the well data. It will open up a file dialog, from there you can select the spreadsheet you want to use.
 
