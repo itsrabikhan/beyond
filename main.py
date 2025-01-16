@@ -697,6 +697,8 @@ def main() -> None:
         end_time = 1
     else:
         end_time = convert_time(end_time)
+    if end_time == 0:
+        end_time = 1
 
     for operation in days[0].copy():
         if operation.get_from() < start_time:
