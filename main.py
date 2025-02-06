@@ -5,20 +5,23 @@ Feel free to read through the code and understand how it works.
 
 
 # IMPORTS
-
-import os
-import math
-import docx
-import pandas as pd
-from docx import Document
-from docx.shared import Pt, Cm, RGBColor
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.enum.table import WD_ALIGN_VERTICAL
-from datetime import datetime
-from docx.oxml.ns import nsdecls
-from docx.oxml import parse_xml
-import tkinter as tk
-from tkinter import filedialog
+try:
+    import os
+    import math
+    import re
+    import pandas as pd
+    from docx import Document
+    from docx.shared import Pt, Cm, RGBColor
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    from docx.enum.table import WD_ALIGN_VERTICAL
+    from datetime import datetime
+    from docx.oxml.ns import nsdecls
+    from docx.oxml import parse_xml
+    import tkinter as tk
+    from tkinter import filedialog
+except:
+    print("Please install the required modules by running the setup.bat file.")
+    exit()
 
 
 # CLASSES
@@ -242,6 +245,7 @@ class Drilling(Operation):
             operation = self.get_operation()
             return Value(float(operation.split("@")[0].replace("Drilling (to ", "").replace("m)", "")), "m")
         except:
+            Logger.warn("No depth reported for this operation.")
             return None
     
     def get_ecd(self) -> Value | None:
@@ -251,6 +255,21 @@ class Drilling(Operation):
             for entry in data:
                 if "ECD" in entry:
                     return Value(float(entry.replace("kg/m³ ECD", "").strip()), "kg/m³")
+            return None
+        except:
+            return None
+        
+    def get_dynamic_bp(self) -> Value | None:
+        operation = self.get_operation()
+        try:
+            data = operation.split("@")[1].split(". ")
+            for entry in data:
+                if "kPa Line Restriction" in entry:
+                    return Value(float(entry.replace("kPa Line Restriction", "").strip()), "kPa")
+                elif "kPa BP" in entry:
+                    return Value(float(entry.replace("kPa BP", "").strip()), "kPa")
+                elif "kPa" in entry:
+                    return Value(float(entry.replace("kPA", "").strip()), "kPa")
             return None
         except:
             return None
@@ -279,6 +298,7 @@ class Connection(Operation):
             operation = self.get_operation()
             return Value(float(operation.split("@")[1].split(". ")[0].replace("m", "").strip()), "m")
         except:
+            Logger.warn("No depth reported for this operation.")
             return None
     
     def get_esd(self) -> Value | None:
@@ -299,6 +319,8 @@ class Connection(Operation):
             for entry in data:
                 if "KSCM/Day B/U" in entry:
                     return Value(float(entry.replace("KSCM/Day B/U", "").strip()), "KSCM/Day B/U")
+                elif "ShakerGas B/U" in entry:
+                    return Value(float(entry.replace("ShakerGas B/U", "").strip()), "ShakerGas B/U")
                 elif "No Gas to Report" in entry:
                     return Value(0, "KSCM/Day")
                 elif "Flame B/U" in entry:
@@ -479,16 +501,41 @@ def parse_sheet(data: pd.DataFrame) -> list:
     # Validate the parsed data.
     operations = []
     for index, row in enumerate(new):
-        if index == 0 and row[0] != "0":
-            Logger.error("Operation summary is malformed, please check the Excel file and try again.")
-            Logger.error("This is most likely because the first operation does not start at 0:00.")
-            return
-        
         if len(row) <= 1:
             break
 
         if len(row) < 5:
             continue
+        
+        # Ensure time is in 0-1 float format.
+        # Checking for HH:MM(:SS) format and converting to float.
+        start = str(row[0])
+        end = str(row[1])
+        if len(start) == 8:
+            start = start[0:5]
+        if len(end) == 8:
+            end = end[0:5]
+        if validate_time(start):
+            row[0] = str(convert_time(start))
+            if row[0] == "0.0":
+                row[0] = "0"
+            if row[0] == "1.0":
+                row[0] = "1"
+        if validate_time(end):
+            row[1] = str(convert_time(end))
+            if row[0] == "0.0":
+                row[0] = "0"
+            if row[0] == "1.0":
+                row[0] = "1"
+
+        # Checking for end time being "1900-01-01 00:00:00" (strange occurrence).
+        if row[1] == "1900-01-01 00:00:00":
+            row[1] = "1"
+
+        if index == 0 and row[0] != "0":
+            Logger.error("Operation summary is malformed, please check the Excel file and try again.")
+            Logger.error("This is most likely because the first operation does not start at 0:00.")
+            return
 
         try:
             connection = int(row[3])
@@ -552,7 +599,7 @@ def main() -> None:
         initialdir=os.getcwd(),
         title="Select the Drilling Operations Report Excel file",
         filetypes=(
-            ("Excel file", "*.xlsb *.xls *.xlsx"),
+            ("Excel file", "*.xlsb *.xls *.xlsx *.xlsm"),
             ("All files (may encounter errors)", "*.*")
         )
     )
@@ -561,13 +608,19 @@ def main() -> None:
     fprint(f"Loading Excel file '{filename}'...")
     try:
         data = pd.ExcelFile(filename)
+    except ImportError:
+        Logger.error("Please install the required modules by running the setup.bat file.")
+        pause()
+        return
     except Exception as e:
         Logger.error(f"An error occurred while loading the Excel file: {e}")
         pause()
         return
     
     pause()
+    generate(data)
 
+def generate(data: pd.ExcelFile) -> None:
     # Get sheet names, and filter only the sheets with dates matching the format (example: "2024 Dec-18").
     sheet_names = data.sheet_names
     sheets = []
@@ -708,6 +761,24 @@ def main() -> None:
         if operation.get_to() > end_time:
             days[-1].remove(operation)
 
+
+    # Ask for line restriction threshold.
+    
+    while True:
+        try:
+            line_restriction_maximum_input = input("Define maximum pressure for line restriction (leave blank for infinite, meaning it will always say Line Restriction): ")
+            if line_restriction_maximum_input == "":
+                line_restriction_maximum = 999999999
+                break
+            line_restriction_maximum = int(line_restriction_maximum_input)
+            if line_restriction_maximum < 0:
+                raise ValueError
+            break
+        except ValueError:
+            Logger.error("Maximum pressure must be a number greater than zero.")
+            pause()
+
+
     # Get the calculated data.
     rows = []
     last_depth = None
@@ -716,6 +787,7 @@ def main() -> None:
         depths = []
         mud_weights = []
         pump_rates = []
+        dynamic_bps = []
         static_bps = []
         ecds = []
         esds = []
@@ -728,6 +800,7 @@ def main() -> None:
             if type(operation) == Drilling:
                 pump_rates.append(operation.get_pump_rate())
                 ecds.append(operation.get_ecd())
+                dynamic_bps.append(operation.get_dynamic_bp())
             elif type(operation) == Connection:
                 esds.append(operation.get_esd())
                 gases.append(operation.get_gas())
@@ -781,8 +854,30 @@ def main() -> None:
             Logger.warn(f"No pump rate reported for Day #{index}.")
             pump_rate = "No pump rate reported"
 
-        # Dynamic BP is always "Line Restriction". Can also be changed later if needed.
-        dynamic_bp = "Line Restriction"
+        # Calculate minimum and maximum values for dynamic BP.
+        # If no values are reported, Line Restriction will be used.
+        # If no value is above the maximum threshold, Line Restriction will be used.
+        try:
+            clean_dynamic_bps = [i.value for i in dynamic_bps if i != None]
+            if len(clean_dynamic_bps) < len(dynamic_bps):
+                Logger.warn(f"Dynamic BP data incomplete for Day #{index}.")
+            if len(clean_dynamic_bps) == 0:
+                dynamic_bp = "Line Restriction"
+            else:
+                dynamic_bp_minimum = min(clean_dynamic_bps)
+                dynamic_bp_maximum = max(clean_dynamic_bps)
+                if dynamic_bp_maximum > line_restriction_maximum:
+                    dynamic_bp_minimum = min([i for i in clean_dynamic_bps if i > line_restriction_maximum])
+                    dynamic_bp_maximum = max([i for i in clean_dynamic_bps if i > line_restriction_maximum])
+
+                    dynamic_bp = f"{dynamic_bp_minimum:.0f} – {dynamic_bp_maximum:.0f}"
+                    if dynamic_bp_minimum == dynamic_bp_maximum:
+                        dynamic_bp = f"{dynamic_bp_minimum:.0f}"
+                else:
+                    dynamic_bp = "Line Restriction"
+        except:
+            Logger.warn(f"No dynamic BP reported for Day #{index}.")
+            dynamic_bp = "Line Restriction"
 
         # Calculate minimum and maximum values for static BP.
         try:
@@ -820,15 +915,28 @@ def main() -> None:
             ecd_esd_average = "No ESD/ECD reported"
 
         # Calculate maximum value for gas.
+        # Gas is unit sensitive, so maximum is calculated differently.
         try:
-            clean_gases = [i.value for i in gases if i != None]
-            if len(clean_gases) < len(gases):
-                Logger.warn(f"Gas data incomplete for Day #{index}.")
-            gas_maximum = max(clean_gases)
-            if gas_maximum == 0:
-                gas = "No B/U gas reported"
+            if len(gases) > 0:
+                gas_maximum = gases[0]
+                for gas in gases:
+                    if gas > gas_maximum:
+                        gas_maximum = gas
+                
+                unit = ""
+                if any("KSCM/Day B/U" == i.unit for i in gases):
+                    unit = "KSCM/Day B/U"
+                elif any("ShakerGas B/U" == i.unit for i in gases):
+                    unit = "ShakerGas B/U"
+                else:
+                    unit = "(unit not recognized)"
+
+                if gas_maximum == 0:
+                    gas = "No B/U gas reported"
+                else:
+                    gas = f"Max {gas_maximum:.1f} {unit} reported"
             else:
-                gas = f"Max {gas_maximum:.1f} kscm/d B/U gas reported"
+                gas = "No B/U gas reported"
         except Exception:
             Logger.warn(f"No gas reported for Day #{index}.")
             gas = "No B/U gas reported"
@@ -843,7 +951,9 @@ def main() -> None:
     # Format the date range.
     start_date = datetime.strptime(start_sheet, '%Y %b-%d')
     end_date = datetime.strptime(end_sheet, '%Y %b-%d')
-    if start_date.month == end_date.month and start_date.year == end_date.year:
+    if start_date == end_date:
+        date_range = f"{start_date.strftime('%b')} {start_date.day}, {start_date.year}"
+    elif start_date.month == end_date.month and start_date.year == end_date.year:
         date_range = f"{start_date.strftime('%b')} {start_date.day} - {end_date.day}, {start_date.year}"
     elif start_date.year == end_date.year:
         date_range = f"{start_date.strftime('%b')} {start_date.day} - {end_date.strftime('%b')} {end_date.day}, {start_date.year}"
@@ -953,7 +1063,9 @@ def main() -> None:
             fprint(f"Report saved as {filename}.")
             fprint(f"What would you like to do next?")
             fprint(f"\t1. Exit the program.")
-            fprint(f"\t2. Generate another report.")
+            fprint(f"\t2. Generate another report from this Excel file.")
+            fprint(f"\t3. Generate a report from a different Excel file.")
+
             while True:
                 try:
                     option = int(input("> "))
@@ -962,6 +1074,8 @@ def main() -> None:
                         fprint("Goodbye! Thank you for using the Drilling Report Parser.")
                         return
                     elif option == 2:
+                        generate(data)
+                    elif option == 3:
                         main()
                     else:
                         raise ValueError
