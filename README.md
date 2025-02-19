@@ -76,7 +76,8 @@ This is because you may already have Python installed, and it is too old for the
 ### Failed to install requirements
 This one may be a bit problematic, since this issue can cause significant problems and requires additional help.
 If you know what you are doing, you may try to type this into your terminal in the directory of the program: `pip install -r requirements.txt`
-If this is unable to help, see the end of this page.
+
+If this does not fix it, or yields further errors, please see the end of the page.
 
 ## During runtime
 This section is still a work in progress!
