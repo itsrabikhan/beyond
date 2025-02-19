@@ -611,11 +611,11 @@ def main() -> None:
     except ImportError:
         Logger.error("Please install the required modules by running the setup.bat file.")
         pause()
-        return
+        quit()
     except Exception as e:
         Logger.error(f"An error occurred while loading the Excel file: {e}")
         pause()
-        return
+        quit()
     
     pause()
     generate(data)
@@ -918,10 +918,11 @@ def generate(data: pd.ExcelFile) -> None:
         # Gas is unit sensitive, so maximum is calculated differently.
         try:
             if len(gases) > 0:
-                gas_maximum = gases[0]
+                gas_units = {}
                 for gas in gases:
-                    if gas > gas_maximum:
-                        gas_maximum = gas
+                    if gas.unit not in gas_units:
+                        gas_units[gas.unit] = []
+                    gas_units[gas.unit].append(gas.value)
                 
                 unit = ""
                 if any("KSCM/Day B/U" == i.unit for i in gases):
@@ -931,13 +932,15 @@ def generate(data: pd.ExcelFile) -> None:
                 else:
                     unit = "(unit not recognized)"
 
+                gas_maximum = max(gas_units[unit])
                 if gas_maximum == 0:
                     gas = "No B/U gas reported"
                 else:
                     gas = f"Max {gas_maximum:.1f} {unit} reported"
             else:
                 gas = "No B/U gas reported"
-        except Exception:
+        except Exception as e:
+            print(e)
             Logger.warn(f"No gas reported for Day #{index}.")
             gas = "No B/U gas reported"
 
