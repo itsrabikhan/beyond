@@ -324,7 +324,7 @@ class Connection(Operation):
                 elif "No Gas to Report" in entry:
                     return Value(0, "KSCM/Day")
                 elif "Flame B/U" in entry:
-                    return Value(0, "KSCM/Day")
+                    return Value(0, "Flame B/U")
             return None
         except Exception as e:
             return None
@@ -940,7 +940,6 @@ def generate(data: pd.ExcelFile) -> None:
             else:
                 gas = "No B/U gas reported"
         except Exception as e:
-            print(e)
             Logger.warn(f"No gas reported for Day #{index}.")
             gas = "No B/U gas reported"
 
