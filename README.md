@@ -42,14 +42,12 @@ Keep in mind that warnings are not always bad, if there is data missing where it
 Always be sure to double check your datasets if there is a warning, but most of the time they can be ignored.
 
 ## Saving the report
-Another file dialog will be opened, but this time it will ask you to save a file.
+Another file dialog will be opened, but this time it will ask you to save a file. This will overwrite the file, meaning it will replace all the data in the selected file.
 
-**This is NOT the full report.** Avoid overwriting files unless you know what you're doing.
-
-This will only create a document with a similarly formatted table for the time range provided. The formatting is not exactly 1:1, so you might not be able to copy paste it, but it should have the correct data.
+**This is NOT the full report.**  This will only create a document with a similarly formatted table for the time range provided. The formatting is not exactly 1:1, so you might not be able to copy paste it, but it should have the correct data.
 
 ## End menu
-After the end of the program, you will be given two options. You may either exit the program, or generate another report.
+After the end of the program, you will be given two options. You may exit the program, or generate another report, with the option of using the same file or picking another one.
 
 This is pretty simple, just type the number next to the option and press Enter. Generating another report will simply take you straight back to the beginning.
 
@@ -76,7 +74,10 @@ There are three main reasons this could happen.
 This is because you may already have Python installed, and it is too old for the program to use. To fix this, run the given installer or install a version from the Python website that is newer than 3.7. This may require you to uninstall your current version, which you can do by searching up Python in your computer's applications, and uninstalling from there.
 
 ### Failed to install requirements
-This one may be a bit problematic, since this issue can cause significant problems and requires additional help. See the end of the page.
+This one may be a bit problematic, since this issue can cause significant problems and requires additional help.
+If you know what you are doing, you may try to type this into your terminal in the directory of the program: `pip install -r requirements.txt`
+
+If this does not fix it, or yields further errors, please see the end of the page.
 
 ## During runtime
 This section is still a work in progress!
